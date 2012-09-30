@@ -6,18 +6,11 @@ import re
 import math
 
 # Sizes for the layers
-class NetSizes:
+class LayerSizes:
 	# Input layer size
-	IN_LAYER = 48
+	IN = 48
 	# Output layer size
-	OUT_LAYER = 6
-
-# Link identifiers
-class LinkIdent:
-	# Between input and middle layers
-	IN_MIDDLE = 'IM'
-	# Between middle and output layers
-	MIDDLE_OUT = 'MO'
+	OUT = 6
 
 # Operation type
 class OpType:
@@ -42,11 +35,10 @@ class PlateRecognizer:
 		return 1.0 / (1.0 + math.exp(-1.0 * sumVal));
 
 	# Trains a randomly constructed neural net
-	def train(self, pattFile, trainOutputFile, numIter, learnTax, expectedError):
+	def train(self, pattFile, trainOutputFile, numIter, learnRate, expectedError, stopIter):
 		# Constructs the initial training matrix
-		inMiddle = [ [ random.random() for i in range(midLayerSize) ] for i in range(IN_LAYER) ]
-		middleOut = [ [ random.random() for i in range(OUT_LAYER) ] for i in range(midLayerSize) ]
-		net = { IN_MIDDLE : inMiddle, MIDDLE_OUT : middleOut }
+		inMiddle = [ [ random.random() for i in range(midLayerSize) ] for i in range(LayerSizes.IN) ]
+		middleOut = [ [ random.random() for i in range(LayerSizes.OUT) ] for i in range(midLayerSize) ]
 
 		# List with all pairs
 		pattPairs = []
@@ -66,22 +58,34 @@ class PlateRecognizer:
 
 			p = PattPair(it[0], it[1])
 			pattPairs.append(p)
+		
+		# Compute data for each training pair
+		for pair in pattPairs:
+			itError = 0
+			numberIt = 0
 
-		itError = 0
-		convIter = 0
-		while numIter > 0:
-			for pair in pattPairs:
-				output = [ None for i in range(len(pattPairs)) ]
-				error = [ None for i in range(len(pattPairs)) ]
-				idx = 0
-
-				for bit in pair.inputPatt:
-					output[idx] = sum(bit * weight for weight in net[IN_MIDDLE][idx]))
-					idx = idx + 1
+			# Train pattern until error is lte expected error
+			while itError > expectedError or numberIt > stopIter:
+				outputMid = [ None for i in range(midLayerSize) ]
+				outputOut = [ None for i in range(LayerSizes.OUT) ]
+				delta = None
 			
-				idx = 0
-				for val in output:
-					output[idx] = self.__sigFunc(sum(val * weight for weight in net[MIDDLE_OUT][idx]))
-					idx = idx + 1
+				# Compute outputs for middle layer
+				for idx in range(midLayerSize):
+					outputMid[idx] = sum(float(pair.inputPatt[idx]) * inMiddle[i][idx] for i in range(LayerSizes.IN))
+		
+				# Compute outputs for output layer
+				for idx in range(LayerSizes.OUT):
+					outputOut[idx] = self.__sigFunc(sum(middleOut[i][idx] * outputMid[idx] for i in range(midLayerSize)))
 
-			numIter = numIter - 1
+				# Compute errors
+				delta = [ (float(pair.expectOut[idx]) - outputOut[idx]) for idx in range(LayerSizes.OUT) ]
+
+				# Catch the greatest error
+				for error in delta:
+					if error > itError:
+						itError = error
+
+				if itError > expectedError:
+					for idx in range(LayerSizes.OUT):
+						weightAdjust = delta
