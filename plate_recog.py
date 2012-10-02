@@ -59,47 +59,45 @@ class PlateRecognizer:
 			p = PattPair(it[0], it[1])
 			pattPairs.append(p)
 		
-		# Compute data for each training pair
-		for pair in pattPairs:
-			itError = 0
-			numberIt = 0
-
-			# Train pattern until error is lte expected error
-			while itError > expectedError or numberIt > stopIter:
-				outputMid = [ None for i in range(midLayerSize) ]
-				outputOut = [ None for i in range(LayerSizes.OUT) ]
-				delta = None
-			
+		# Train pattern for x iterations
+		for i in range(stopIter):
+			# Compute data for each training pair
+			for pair in pattPairs:
+				outputMid = [ 0.0 for i in range(midLayerSize) ]
+				outputOut = [ 0.0 for i in range(LayerSizes.OUT) ]
+				deltaOut = None
+				deltaMid = [ 0.0 for i in range(midLayerSize) ]
+				errorOut = None
+				errorMid = None
+						
 				# Compute outputs for middle layer
 				for idx in range(midLayerSize):
-					outputMid[idx] = sum(float(pair.inputPatt[idx]) * inMiddle[i][idx] for i in range(LayerSizes.IN))
-		
+					for i in range(LayerSizes.IN):
+						outputMid[idx] = outputMid[idx] + (float(pair.inputPatt[i]) * inMiddle[i][idx])
+
 				# Compute outputs for output layer
 				for idx in range(LayerSizes.OUT):
 					outputOut[idx] = self.__sigFunc(sum(middleOut[i][idx] * outputMid[idx] for i in range(midLayerSize)))
 
-				# Compute errors
-				delta = [ (float(pair.expectOut[idx]) - outputOut[idx]) for idx in range(LayerSizes.OUT) ]
+				# Compute error factors and errors
+				deltaOut = [ (float(pair.expectOut[idx]) - outputOut[idx]) for idx in range(LayerSizes.OUT) ]
 
-				# Catch the greatest error
-				for error in delta:
-					if error > itError:
-						itError = error
+				errorOut = [ (outputOut[idx] * (1 - outputOut[idx]) * deltaOut[idx]) for idx in range(LayerSizes.OUT) ]
 
-				# Adjusts the weights
-				if itError > expectedError:
+				for i in range(midLayerSize):
 					for idx in range(LayerSizes.OUT):
-						wAdjOut = delta[idx] * outputOut[idx] * learnRate
-						
-						for i in range(len(middleOut[idx])):
-							middleOut[idx][i] = middleOut[idx][i] - wAdjOut
+						deltaMid[i] = deltaMid[i] + (errorOut[idx] * middleOut[i][idx])
 
-						wAdjMid = delta[idx] * outputMid[idx] * learnRate
+				errorMid = [ (outputMid[idx] * (1 - outputMid[idx]) * deltaMid[idx]) for idx in range(midLayerSize) ]
 
-						for i in range(len(inMiddle[idx])):
-							inMiddle[idx][i] = inMiddle[idx][i] - wAdjMid
+				# Update link weights
+				for j in range(midLayerSize):
+					for i in range(LayerSizes.IN):
+						inMiddle[i][j] = inMiddle[i][j] + (learnRate * outputMid[j] * errorMid[j])
 
-				numberIt = numberIt + 1
+				for j in range(LayerSizes.OUT):
+					for i in range(midLayerSize):
+						middleOut[i][j] = middleOut[i][j] + (learnRate * outputOut[j] * errorOut[j])
 
 		# Write data to a file
 		with open(trainOutputFile, "w") as f:
@@ -150,10 +148,10 @@ class PlateRecognizer:
 
 		# Compute outputs for middle layer
 		for idx in range(midLayerSize):
-			outputMid[idx] = sum(float(pattern[idx]) * inMiddle[i][idx] for i in range(LayerSizes.IN))
+			outputMid[idx] = sum(float(pattern[i]) * inMiddle[i][idx] for i in range(LayerSizes.IN))
 		
 		# Compute outputs for output layer
 		for idx in range(LayerSizes.OUT):
-			outputOut[idx] = self.__sigFunc(sum(middleOut[i][idx] * outputMid[idx] for i in range(midLayerSize)))
+			outputOut[idx] = sum(middleOut[i][idx] * outputMid[idx] for i in range(midLayerSize))
 
 		return outputOut
