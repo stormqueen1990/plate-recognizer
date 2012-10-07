@@ -4,7 +4,6 @@
 import random
 import re
 import math
-from decimal import Decimal
 
 # Sizes for the layers
 class LayerSizes:
@@ -29,53 +28,65 @@ class PattPair:
 		self.inputPatt = inputPatt
 		self.expectOut = expectOut
 
+# Read and return all pattern pairs from file
+def readPatternFile(patternFileName):
+	# List with all pairs
+	pattPairs = []
+
+	# Creates the regexp to search for patterns
+	regexpPatt = re.compile("([01]+)")
+
+	# Searches the file for patterns
+	fPatt = open(patternFileName, "r")
+
+	for line in fPatt:
+		it = regexpPatt.findall(line)
+
+		# Does line contain a pair?
+		if len(it) < 2:
+			raise ValueError("all lines must contain a pair")
+
+		p = PattPair(it[0], it[1])
+		pattPairs.append(p)
+	
+	fPatt.close()
+
+	return pattPairs
+
 # Plate recognizement kernel
 class PlateRecognizer:
 	# Sigmoid function
 	def __sigFunc(self, sumVal):
-		one = Decimal(1.0)
-		return one / (one + Decimal(Decimal(-sumVal).exp()));
+		return 1.0/(1.0+math.exp(-sumVal))
 
 	# Trains a randomly constructed neural net
-	def train(self, pattFile, trainOutputFile, midLayerSize, learnRate, expectedError, stopIter):
+	def train(self, pattFile, trainOutputFile, midLayerSize, learnRate, stopIter):
+		random.seed()
 		# Constructs the initial training matrix
-		inMiddle = [ [ Decimal(random.random()) for i in range(midLayerSize) ] for i in range(LayerSizes.IN) ]
-		middleOut = [ [ Decimal(random.random()) for i in range(LayerSizes.OUT) ] for i in range(midLayerSize) ]
+		inMiddle = [ [ float(random.randint(0,999))/float(1000) for i in range(midLayerSize) ] for i in range(LayerSizes.IN) ]
+		middleOut = [ [ float(random.randint(0,999))/float(1000) for i in range(LayerSizes.OUT) ] for i in range(midLayerSize) ]
 
 		# List with all pairs
-		pattPairs = []
+		pattPairs = readPatternFile(pattFile)
+	
+		# Compute data for each training pair
+		for pair in pattPairs:
 
-		# Creates the regexp to search for patterns
-		regexpPatt = re.compile("([01]+)")
-
-		# Searches the file for patterns
-		fPatt = open(pattFile, "r")
-
-		for line in fPatt:
-			it = regexpPatt.findall(line)
-
-			# Does line contain a pair?
-			if len(it) < 2:
-				raise ValueError("all lines must contain a pair")
-
-			p = PattPair(it[0], it[1])
-			pattPairs.append(p)
-		
-		# Train pattern for x iterations
-		for i in range(stopIter):
-			# Compute data for each training pair
-			for pair in pattPairs:
-				outputMid = [ Decimal(0.0) for i in range(midLayerSize) ]
-				outputOut = [ Decimal(0.0) for i in range(LayerSizes.OUT) ]
+			# Train pattern for x iterations
+			for i in range(stopIter):
+				outputMid = [ 0.0 for i in range(midLayerSize) ]
+				outputOut = [ 0.0 for i in range(LayerSizes.OUT) ]
 				deltaOut = None
-				deltaMid = [ Decimal(0.0) for i in range(midLayerSize) ]
+				deltaMid = None
 				errorOut = None
 				errorMid = None
 						
 				# Compute outputs for middle layer
 				for idx in range(midLayerSize):
 					for i in range(LayerSizes.IN):
-						outputMid[idx] = outputMid[idx] + (Decimal(pair.inputPatt[i]) * inMiddle[i][idx])
+						outputMid[idx] = outputMid[idx] + (float(pair.inputPatt[i]) * inMiddle[i][idx])	
+					
+					outputMid[idx] = self.__sigFunc(outputMid[idx])
 
 				# Compute outputs for output layer
 				for idx in range(LayerSizes.OUT):
@@ -85,13 +96,11 @@ class PlateRecognizer:
 					outputOut[idx] = self.__sigFunc(outputOut[idx])
 
 				# Compute error factors and errors
-				deltaOut = [ (Decimal(pair.expectOut[idx]) - outputOut[idx]) for idx in range(LayerSizes.OUT) ]
+				deltaOut = [ (float(pair.expectOut[idx]) - outputOut[idx]) for idx in range(LayerSizes.OUT) ]
 
 				errorOut = [ (outputOut[idx] * (1 - outputOut[idx]) * deltaOut[idx]) for idx in range(LayerSizes.OUT) ]
 
-				for i in range(midLayerSize):
-					for idx in range(LayerSizes.OUT):
-						deltaMid[i] = deltaMid[i] + (errorOut[idx] * middleOut[i][idx])
+				deltaMid = [ sum(errorOut[idx] * middleOut[i][idx] for idx in range(LayerSizes.OUT)) for i in range(midLayerSize) ] 
 
 				errorMid = [ (outputMid[idx] * (1 - outputMid[idx]) * deltaMid[idx]) for idx in range(midLayerSize) ]
 
@@ -123,9 +132,10 @@ class PlateRecognizer:
 			f.close()
 
 	# Recognizes a pattern
-	def recognize(self, netFilename, pattern):
+	def recognize(self, netFilename, patternFile):
 		inMiddle = []
 		middleOut = []
+		patterns = readPatternFile(patternFile)
 
 		numberRegexp = re.compile("([0-9]+\.[0-9]+)")
 		idx = 0
@@ -134,7 +144,7 @@ class PlateRecognizer:
 		with open(netFilename, "r") as f:
 			for line in f:
 				if line.strip():
-					valList = [ Decimal(item) for item in numberRegexp.findall(line) ]
+					valList = [ float(item) for item in numberRegexp.findall(line) ]
 
 					if idx < 48:
 						inMiddle.append(valList)
@@ -147,16 +157,17 @@ class PlateRecognizer:
 
 		midLayerSize = len(middleOut)
 
-		# Recognizes the given pattern
-		outputMid = [ None for i in range(midLayerSize) ]
-		outputOut = [ None for i in range(LayerSizes.OUT) ]
+		for pattern in patterns:
+			# Recognizes the given pattern
+			outputMid = [ None for i in range(midLayerSize) ]
+			outputOut = [ None for i in range(LayerSizes.OUT) ]
 
-		# Compute outputs for middle layer
-		for idx in range(midLayerSize):
-			outputMid[idx] = sum(Decimal(pattern[i]) * inMiddle[i][idx] for i in range(LayerSizes.IN))
+			# Compute outputs for middle layer
+			for idx in range(midLayerSize):
+				outputMid[idx] = sum(float(pattern.inputPatt[i]) * inMiddle[i][idx] for i in range(LayerSizes.IN))
 		
-		# Compute outputs for output layer
-		for idx in range(LayerSizes.OUT):
-			outputOut[idx] = self.__sigFunc(sum(middleOut[i][idx] * outputMid[idx] for i in range(midLayerSize)))
+			# Compute outputs for output layer
+			for idx in range(LayerSizes.OUT):
+				outputOut[idx] = self.__sigFunc(sum(middleOut[i][idx] * self.__sigFunc(outputMid[idx]) for i in range(midLayerSize)))
 
-		return outputOut
+			print outputOut
