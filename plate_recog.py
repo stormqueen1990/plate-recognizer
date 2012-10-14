@@ -57,14 +57,14 @@ def readPatternFile(patternFileName):
 class PlateRecognizer:
 	# Sigmoid function
 	def __sigFunc(self, sumVal):
-		return 1.0/(1.0+math.exp(-sumVal))
+		return 1.0 / (1.0 + math.exp(-sumVal))
 
 	# Trains a randomly constructed neural net
 	def train(self, pattFile, trainOutputFile, midLayerSize, learnRate, stopIter):
 		random.seed()
 		# Constructs the initial training matrix
-		inMiddle = [ [ float(random.randint(0,999))/float(1000) for i in range(midLayerSize) ] for i in range(LayerSizes.IN) ]
-		middleOut = [ [ float(random.randint(0,999))/float(1000) for i in range(LayerSizes.OUT) ] for i in range(midLayerSize) ]
+		inMiddle = [ [ random.random()/100.0 for i in range(midLayerSize) ] for i in range(LayerSizes.IN) ]
+		middleOut = [ [ random.random()/100.0 for i in range(LayerSizes.OUT) ] for i in range(midLayerSize) ]
 
 		# List with all pairs
 		pattPairs = readPatternFile(pattFile)
@@ -76,10 +76,10 @@ class PlateRecognizer:
 			for i in range(stopIter):
 				outputMid = [ 0.0 for i in range(midLayerSize) ]
 				outputOut = [ 0.0 for i in range(LayerSizes.OUT) ]
-				deltaOut = None
-				deltaMid = None
-				errorOut = None
-				errorMid = None
+				deltaOut = []
+				deltaMid = []
+				errorOut = []
+				errorMid = []
 						
 				# Compute outputs for middle layer
 				for idx in range(midLayerSize):
@@ -91,27 +91,32 @@ class PlateRecognizer:
 				# Compute outputs for output layer
 				for idx in range(LayerSizes.OUT):
 					for i in range(midLayerSize):
-						outputOut[idx] = outputOut[idx] + (middleOut[i][idx] * outputMid[idx])
+						outputOut[idx] = outputOut[idx] + (middleOut[i][idx] * outputMid[i])
 
 					outputOut[idx] = self.__sigFunc(outputOut[idx])
 
 				# Compute error factors and errors
-				deltaOut = [ (float(pair.expectOut[idx]) - outputOut[idx]) for idx in range(LayerSizes.OUT) ]
+				for idx in range(LayerSizes.OUT):
+					errorFactor = float(pair.expectOut[idx]) - outputOut[idx]
+					deltaOut.append(errorFactor)
+					errorOut.append(outputOut[idx] * (1 - outputOut[idx]) * errorFactor)
+				
+				for idx in range(midLayerSize):
+					errorFactor = 0.0
+					for i in range(LayerSizes.OUT):
+						errorFactor = errorFactor + (errorOut[i] * middleOut[idx][i])
 
-				errorOut = [ (outputOut[idx] * (1 - outputOut[idx]) * deltaOut[idx]) for idx in range(LayerSizes.OUT) ]
-
-				deltaMid = [ sum(errorOut[idx] * middleOut[i][idx] for idx in range(LayerSizes.OUT)) for i in range(midLayerSize) ] 
-
-				errorMid = [ (outputMid[idx] * (1 - outputMid[idx]) * deltaMid[idx]) for idx in range(midLayerSize) ]
+					deltaMid.append(errorFactor)
+					errorMid.append(outputMid[idx] * (1 - outputMid[idx]) * errorFactor)
 
 				# Update link weights
 				for j in range(midLayerSize):
 					for i in range(LayerSizes.IN):
-						inMiddle[i][j] = inMiddle[i][j] + (learnRate * outputMid[j] * errorMid[j])
+						inMiddle[i][j] = inMiddle[i][j] + (learnRate * float(pair.inputPatt[i]) * errorMid[j])
 
 				for j in range(LayerSizes.OUT):
 					for i in range(midLayerSize):
-						middleOut[i][j] = middleOut[i][j] + (learnRate * outputOut[j] * errorOut[j])
+						middleOut[i][j] = middleOut[i][j] + (learnRate * outputMid[i] * errorOut[j])
 
 		# Write data to a file
 		with open(trainOutputFile, "w") as f:
@@ -159,15 +164,21 @@ class PlateRecognizer:
 
 		for pattern in patterns:
 			# Recognizes the given pattern
-			outputMid = [ None for i in range(midLayerSize) ]
-			outputOut = [ None for i in range(LayerSizes.OUT) ]
+			outputMid = [ 0.0 for i in range(midLayerSize) ]
+			outputOut = [ 0.0 for i in range(LayerSizes.OUT) ]
 
 			# Compute outputs for middle layer
 			for idx in range(midLayerSize):
-				outputMid[idx] = sum(float(pattern.inputPatt[i]) * inMiddle[i][idx] for i in range(LayerSizes.IN))
-		
+				for i in range(LayerSizes.IN):
+					outputMid[idx] = outputMid[idx] + (float(pattern.inputPatt[i]) * inMiddle[i][idx])
+
+				outputMid[idx] = self.__sigFunc(outputMid[idx])
+					
 			# Compute outputs for output layer
 			for idx in range(LayerSizes.OUT):
-				outputOut[idx] = self.__sigFunc(sum(middleOut[i][idx] * self.__sigFunc(outputMid[idx]) for i in range(midLayerSize)))
+				for i in range(midLayerSize):
+					outputOut[idx] = outputOut[idx] + (outputMid[i] * middleOut[i][idx])
 
+				outputOut[idx] = self.__sigFunc(outputOut[idx])
+			
 			print outputOut
