@@ -4,6 +4,7 @@
 import random
 import re
 import math
+import StringIO
 
 # Sizes for the layers
 class LayerSizes:
@@ -17,17 +18,70 @@ class OpType:
 	TRAIN = 1
 	RECOG = 2
 
-# Training type
-class TrainType:
-	BATCH = 1
-	ALTERNATED = 2
-
 # Pattern pairs class
 class PattPair:
 	def __init__(self, inputPatt, expectOut):
 		self.inputPatt = inputPatt
 		self.expectOut = expectOut
 
+class Neuron:		
+	def __init__(self, size):
+		if size > 0:
+			self.weights = [ random.random() for i in range(size) ]
+
+	def __sigmoidFunction(self, value):
+		return 1.0 / (1.0 + math.exp(-value))
+	
+	def calculateOut(self):
+		sumValue = sum(self.weights[i] * self.inputs[i] for i in range(len(self.weights)))
+		self.output = self.__sigmoidFunction(sumValue)
+	
+	def calculateErrorValue(self):
+		self.errorValue = self.output * (1.0 - self.output) * self.errorFactor
+	
+	def updateWeights(self, inputLayer, learnRate):
+		for i in range(len(self.weights)):
+			self.weights[i] = self.weights[i] + (learnRate * inputLayer[i].output * self.errorValue)
+
+class InputNeuron(Neuron):
+	def __init__(self):
+		Neuron.__init__(self, 0)
+
+	def calculateOut(self):
+		self.output = self.inputValue
+
+	def calculateErrorValue(self):
+		raise NotImplemented("not implemented for this class")
+
+	def updateWeights(self, inputLayer, learnRate):
+		raise NotImplemented("not implemented for this class")
+	
+	def setInputs(self, inputValue):
+		self.inputValue = inputValue
+
+class MiddleNeuron(Neuron):
+	def __init__(self, middleLayerSize):
+		Neuron.__init__(self, middleLayerSize)
+
+	def calculateErrorFactor(self, outputLayer):
+		self.errorFactor = sum(outputLayer[i].errorValue * self.weights[i] for i in range(LayerSizes.OUT))
+
+	def setInputs(self, inputs):
+		self.inputs = inputs
+	
+class OutputNeuron(Neuron):
+	def __init__(self):
+		Neuron.__init__(self, LayerSizes.OUT)
+
+	def calculateErrorFactor(self):
+		self.errorFactor = self.expectedOutput - self.output
+	
+	def setInputs(self, inputs):
+		self.inputs = inputs
+	
+	def setExpectedOutput(self, expectedOutput):
+		self.expectedOutput = expectedOutput
+	
 # Read and return all pattern pairs from file
 def readPatternFile(patternFileName):
 	# List with all pairs
@@ -53,132 +107,89 @@ def readPatternFile(patternFileName):
 
 	return pattPairs
 
-# Plate recognizement kernel
-class PlateRecognizer:
-	# Sigmoid function
-	def __sigFunc(self, sumVal):
-		return 1.0 / (1.0 + math.exp(-sumVal))
+class NeuralNet:
+	def __init__(self):
+		self.inputLayer = None
+		self.middleLayer = None
+		self.outputLayer = None
 
-	# Trains a randomly constructed neural net
-	def train(self, pattFile, trainOutputFile, midLayerSize, learnRate, stopIter):
-		random.seed()
-		# Constructs the initial training matrix
-		inMiddle = [ [ random.random()/100.0 for i in range(midLayerSize) ] for i in range(LayerSizes.IN) ]
-		middleOut = [ [ random.random()/100.0 for i in range(LayerSizes.OUT) ] for i in range(midLayerSize) ]
+	def train(self, patternFileName, outputFileName, middleLayerSize, learnRate, iterNumber):
+		patternPairs = readPatternFile(patternFileName)
+		inputLayer = [ InputNeuron() for i in range(LayerSizes.IN) ]
+		middleLayer = [ MiddleNeuron(middleLayerSize) for i in range(middleLayerSize) ]
+		outputLayer = [ OutputNeuron() for i in range(LayerSizes.OUT) ]
+		
+		for i in range(iterNumber):
+			for pair in patternPairs:
+				idx = 0
+				for bit in pair.inputPatt:
+					inputLayer[idx].inputValue = float(bit)
+					idx = idx + 1
 
-		# List with all pairs
-		pattPairs = readPatternFile(pattFile)
-	
-		# Compute data for each training pair
-		for pair in pattPairs:
-
-			# Train pattern for x iterations
-			for i in range(stopIter):
-				outputMid = [ 0.0 for i in range(midLayerSize) ]
-				outputOut = [ 0.0 for i in range(LayerSizes.OUT) ]
-				deltaOut = []
-				deltaMid = []
-				errorOut = []
-				errorMid = []
-						
-				# Compute outputs for middle layer
-				for idx in range(midLayerSize):
-					for i in range(LayerSizes.IN):
-						outputMid[idx] = outputMid[idx] + (float(pair.inputPatt[i]) * inMiddle[i][idx])	
-					
-					outputMid[idx] = self.__sigFunc(outputMid[idx])
-
-				# Compute outputs for output layer
-				for idx in range(LayerSizes.OUT):
-					for i in range(midLayerSize):
-						outputOut[idx] = outputOut[idx] + (middleOut[i][idx] * outputMid[i])
-
-					outputOut[idx] = self.__sigFunc(outputOut[idx])
-
-				# Compute error factors and errors
-				for idx in range(LayerSizes.OUT):
-					errorFactor = float(pair.expectOut[idx]) - outputOut[idx]
-					deltaOut.append(errorFactor)
-					errorOut.append(outputOut[idx] * (1 - outputOut[idx]) * errorFactor)
+				idx = 0
+				for bit in pair.expectOut:
+					outputLayer[idx].setExpectedOutput(float(bit))
+					idx = idx + 1
 				
-				for idx in range(midLayerSize):
-					errorFactor = 0.0
-					for i in range(LayerSizes.OUT):
-						errorFactor = errorFactor + (errorOut[i] * middleOut[idx][i])
+				middleLayerInputs = []
+				for neuron in inputLayer:
+					neuron.calculateOut()
+					middleLayerInputs.append(neuron.output)
 
-					deltaMid.append(errorFactor)
-					errorMid.append(outputMid[idx] * (1 - outputMid[idx]) * errorFactor)
+				outputLayerInputs = []
+				for neuron in middleLayer:
+					neuron.setInputs(middleLayerInputs)
+					neuron.calculateOut()
+					outputLayerInputs.append(neuron.output)
 
-				# Update link weights
-				for j in range(midLayerSize):
-					for i in range(LayerSizes.IN):
-						inMiddle[i][j] = inMiddle[i][j] + (learnRate * float(pair.inputPatt[i]) * errorMid[j])
+				for neuron in outputLayer:
+					neuron.setInputs(outputLayerInputs)
+					neuron.calculateOut()
+					neuron.calculateErrorFactor()
+					neuron.calculateErrorValue()
 
-				for j in range(LayerSizes.OUT):
-					for i in range(midLayerSize):
-						middleOut[i][j] = middleOut[i][j] + (learnRate * outputMid[i] * errorOut[j])
+				for neuron in middleLayer:
+					neuron.calculateErrorFactor(outputLayer)
+					neuron.calculateErrorValue()
+					neuron.updateWeights(inputLayer, learnRate)
 
-		# Write data to a file
-		with open(trainOutputFile, "w") as f:
-			for line in inMiddle:
-				for val in line:
-					f.write("{!s} ".format(val))
+				for neuron in outputLayer:
+					neuron.updateWeights(middleLayer, learnRate)
 
-				f.write("\n")
-
-			f.write("\n")
-
-			for line in middleOut:
-				for val in line:
-					f.write("{!s} ".format(val))
-
-				f.write("\n")
-
-			f.close()
-
-	# Recognizes a pattern
-	def recognize(self, netFilename, patternFile):
-		inMiddle = []
-		middleOut = []
-		patterns = readPatternFile(patternFile)
-
-		numberRegexp = re.compile("([0-9]+\.[0-9]+)")
+		self.inputLayer = inputLayer
+		self.middleLayer = middleLayer
+		self.outputLayer = outputLayer
+	
+	def recognize(self, pattern):
 		idx = 0
+		for bit in pattern:
+			self.inputLayer[idx].inputValue = float(bit)
+			idx = idx + 1
+		
+		middleLayerInputs = []
+		for neuron in self.inputLayer:
+			neuron.calculateOut()
+			middleLayerInputs.append(neuron.output)
 
-		# Read the selected train file
-		with open(netFilename, "r") as f:
-			for line in f:
-				if line.strip():
-					valList = [ float(item) for item in numberRegexp.findall(line) ]
+		outputLayerInputs = []
+		for neuron in self.middleLayer:
+			neuron.setInputs(middleLayerInputs)
+			neuron.calculateOut()
+			outputLayerInputs.append(neuron.output)
 
-					if idx < 48:
-						inMiddle.append(valList)
-					else:
-						middleOut.append(valList)
+		for neuron in self.outputLayer:
+			neuron.setInputs(outputLayerInputs)
+			neuron.calculateOut()
 
-				idx = idx + 1
+		return self.__prepareAnswer(self.outputLayer)
+		
+	def __prepareAnswer(self):
+		answerBuilder = StringIO.StringIO()
+		
+		for neuron in self.outputLayer:
+			answerBuilder.write(1 if neuron.output >= 0.5 else 0)
 
-			f.close()
+		answer = answerBuilder.getvalue()
+		answerBuilder.close()
 
-		midLayerSize = len(middleOut)
-
-		for pattern in patterns:
-			# Recognizes the given pattern
-			outputMid = [ 0.0 for i in range(midLayerSize) ]
-			outputOut = [ 0.0 for i in range(LayerSizes.OUT) ]
-
-			# Compute outputs for middle layer
-			for idx in range(midLayerSize):
-				for i in range(LayerSizes.IN):
-					outputMid[idx] = outputMid[idx] + (float(pattern.inputPatt[i]) * inMiddle[i][idx])
-
-				outputMid[idx] = self.__sigFunc(outputMid[idx])
-					
-			# Compute outputs for output layer
-			for idx in range(LayerSizes.OUT):
-				for i in range(midLayerSize):
-					outputOut[idx] = outputOut[idx] + (outputMid[i] * middleOut[i][idx])
-
-				outputOut[idx] = self.__sigFunc(outputOut[idx])
-			
-			print outputOut
+		return answer
