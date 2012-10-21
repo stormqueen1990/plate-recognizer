@@ -5,6 +5,7 @@ import random
 import re
 import math
 import StringIO
+from PySide import *
 
 # Sizes for the layers
 class LayerSizes:
@@ -24,8 +25,12 @@ class PattPair:
 		self.inputPatt = inputPatt
 		self.expectOut = expectOut
 
-class Neuron:		
-	def __init__(self, size):
+# Neuron representation
+class Neuron:
+	def __init__(self):
+		self.weights = None
+
+	def initializeWeights(self, size):
 		if size > 0:
 			self.weights = [ random.random() for i in range(size) ]
 
@@ -43,9 +48,10 @@ class Neuron:
 		for i in range(len(self.weights)):
 			self.weights[i] = self.weights[i] + (learnRate * inputLayer[i].output * self.errorValue)
 
+# Input layer neuron specialization
 class InputNeuron(Neuron):
 	def __init__(self):
-		Neuron.__init__(self, 0)
+		Neuron.__init__(self)
 
 	def calculateOut(self):
 		self.output = self.inputValue
@@ -59,65 +65,97 @@ class InputNeuron(Neuron):
 	def setInputs(self, inputValue):
 		self.inputValue = inputValue
 
+# Middle layer neuron specialization
 class MiddleNeuron(Neuron):
-	def __init__(self, middleLayerSize):
-		Neuron.__init__(self, middleLayerSize)
+	def __init__(self, middleLayerSize = None):
+		Neuron.__init__(self)
+
+		if middleLayerSize != None:
+			self.initializeWeights(middleLayerSize)
 
 	def calculateErrorFactor(self, outputLayer):
 		self.errorFactor = sum(outputLayer[i].errorValue * self.weights[i] for i in range(LayerSizes.OUT))
 
 	def setInputs(self, inputs):
 		self.inputs = inputs
-	
+
+# Output layer neuron specialization
 class OutputNeuron(Neuron):
-	def __init__(self):
-		Neuron.__init__(self, LayerSizes.OUT)
+	def __init__(self, initWeights):
+		Neuron.__init__(self)
+		self.expectedOutput = None
+
+		if initWeights:
+			self.initializeWeights(LayerSizes.OUT)
 
 	def calculateErrorFactor(self):
 		self.errorFactor = self.expectedOutput - self.output
 	
 	def setInputs(self, inputs):
 		self.inputs = inputs
+
+class WrongFormatException(Exception):
+	def __init__(self, message):
+		self.message = message
 	
-	def setExpectedOutput(self, expectedOutput):
-		self.expectedOutput = expectedOutput
+	def __str__(self):
+		return self.message
+
+class UnexpectedSizeException(Exception):
+	def __init__(self, message):
+		self.message = message
 	
-# Read and return all pattern pairs from file
-def readPatternFile(patternFileName):
-	# List with all pairs
-	pattPairs = []
-
-	# Creates the regexp to search for patterns
-	regexpPatt = re.compile("([01]+)")
-
-	# Searches the file for patterns
-	fPatt = open(patternFileName, "r")
-
-	for line in fPatt:
-		it = regexpPatt.findall(line)
-
-		# Does line contain a pair?
-		if len(it) < 2:
-			raise ValueError("all lines must contain a pair")
-
-		p = PattPair(it[0], it[1])
-		pattPairs.append(p)
+	def __str__(self):
+		return self.message
 	
-	fPatt.close()
-
-	return pattPairs
-
 class NeuralNet:
 	def __init__(self):
 		self.inputLayer = None
 		self.middleLayer = None
 		self.outputLayer = None
+	
+	# Read and return all pattern pairs from file
+	def readPatternFile(self, patternFileName):
+		# List with all pairs
+		pattPairs = []
 
-	def train(self, patternFileName, outputFileName, middleLayerSize, learnRate, iterNumber):
-		patternPairs = readPatternFile(patternFileName)
+		# Creates the regexp to search for patterns
+		regexpPatt = re.compile("([^\\s]+)")
+
+		# Searches the file for patterns
+		fPatt = open(patternFileName, "r")
+
+		self.answers = {}
+		self.data = {}
+
+		for line in fPatt:
+			it = regexpPatt.findall(line)
+
+			# Does line contain three entries?
+			if len(it) < 3:
+				raise WrongFormatException(u"todas as linhas do arquivo " + patternFileName + u" deveriam conter um par separado por espaço, seguido do valor representado pelo par")
+
+			if len(it[0]) != LayerSizes.IN:
+				raise UnexpectedSizeException(u"o padrão de entrada deve conter " + `LayerSizes.IN` + " caracteres")
+
+			if len(it[1]) != LayerSizes.OUT:
+				raise UnexpectedSizeException(u"a saída esperada deve conter " + `LayerSizes.OUT` + " caracteres")
+
+			p = PattPair(it[0], it[1])
+			pattPairs.append(p)
+
+			self.answers[it[1]] = it[2]
+			self.data
+	
+		fPatt.close()
+
+		return pattPairs
+
+	def train(self, patternFileName, middleLayerSize, learnRate, iterNumber, progressBar):
+		patternPairs = self.readPatternFile(patternFileName)
 		inputLayer = [ InputNeuron() for i in range(LayerSizes.IN) ]
 		middleLayer = [ MiddleNeuron(middleLayerSize) for i in range(middleLayerSize) ]
-		outputLayer = [ OutputNeuron() for i in range(LayerSizes.OUT) ]
+		outputLayer = [ OutputNeuron(True) for i in range(LayerSizes.OUT) ]
 		
 		for i in range(iterNumber):
 			for pair in patternPairs:
@@ -128,7 +166,7 @@ class NeuralNet:
 
 				idx = 0
 				for bit in pair.expectOut:
-					outputLayer[idx].setExpectedOutput(float(bit))
+					outputLayer[idx].expectedOutput = float(bit)
 					idx = idx + 1
 				
 				middleLayerInputs = []
@@ -156,6 +194,8 @@ class NeuralNet:
 				for neuron in outputLayer:
 					neuron.updateWeights(middleLayer, learnRate)
 
+			progressBar.setValue(i)
+
 		self.inputLayer = inputLayer
 		self.middleLayer = middleLayer
 		self.outputLayer = outputLayer
@@ -181,15 +221,87 @@ class NeuralNet:
 			neuron.setInputs(outputLayerInputs)
 			neuron.calculateOut()
 
-		return self.__prepareAnswer(self.outputLayer)
+		return self.__prepareAnswer()
 		
 	def __prepareAnswer(self):
 		answerBuilder = StringIO.StringIO()
 		
 		for neuron in self.outputLayer:
-			answerBuilder.write(1 if neuron.output >= 0.5 else 0)
+			if neuron.output >= 0.5:
+				answerBuilder.write("1")
+			else:
+				answerBuilder.write("0")
 
+		answerBuilder.flush()
 		answer = answerBuilder.getvalue()
 		answerBuilder.close()
 
-		return answer
+		newAnswer = self.answers.get(answer)
+		if newAnswer != None:
+			return newAnswer
+		
+		return ""
+	
+	def exportNet(self, neuralNetFilename):
+		neuralNetFile = QtCore.QFile(neuralNetFilename)
+		if neuralNetFile.open(QtCore.QIODevice.WriteOnly):
+			netFileWriter = QtCore.QXmlStreamWriter(neuralNetFile)
+			netFileWriter.setAutoFormatting(True)
+			netFileWriter.setAutoFormattingIndent(-1)
+			netFileWriter.writeStartDocument()
+
+			netFileWriter.writeStartElement(u"neuralNet")
+
+			self.__exportLayer(netFileWriter, u"middleNode", self.middleLayer)
+			self.__exportLayer(netFileWriter, u"outputNode", self.outputLayer)
+
+			netFileWriter.writeEndElement() # neuralNet
+
+			netFileWriter.writeEndDocument()
+			neuralNetFile.close()
+	
+	def __exportLayer(self, netFileWriter, elementName, layer):
+		idx = 0
+		for neuron in layer:
+			netFileWriter.writeStartElement(elementName)
+			netFileWriter.writeAttribute(u"id", unicode(idx))
+			idx = idx + 1
+			netFileWriter.writeStartElement(u"weights")
+
+			for weight in neuron.weights:
+				netFileWriter.writeStartElement(u"weight")
+				netFileWriter.writeAttribute(u"value", unicode(weight))
+				netFileWriter.writeEndElement() # weight
+
+			netFileWriter.writeEndElement() # weights
+			netFileWriter.writeEndElement() # elementName
+	
+	def importNet(self, neuralNetFilename):
+		neuralNetFile = QtCore.QFile(neuralNetFilename)
+		if neuralNetFile.open(QtCore.QIODevice.ReadOnly):
+			netFileReader = QtCore.QXmlStreamReader(neuralNetFile)
+
+			self.inputLayer = [ InputNeuron() for i in range(LayerSizes.IN) ]
+			self.middleLayer = []
+			self.outputLayer = []
+
+			weights = []
+			while not netFileReader.atEnd():
+				token = netFileReader.readNext()
+				if token == QtCore.QXmlStreamReader.StartElement:
+					if netFileReader.name() == u"weight":
+						weight = netFileReader.attributes().value(u"value")
+						weights.append(float(weight))
+				elif token == QtCore.QXmlStreamReader.EndElement:
+					if netFileReader.name() == u"middleNode":
+						neuron = MiddleNeuron()
+						neuron.weights = weights
+						self.middleLayer.append(neuron)
+						weights = []
+					elif netFileReader.name() == u"outputNode":
+						neuron = OutputNeuron(False)
+						neuron.weights = weights
+						self.outputLayer.append(neuron)
+						weights = []
+
+			neuralNetFile.close()
