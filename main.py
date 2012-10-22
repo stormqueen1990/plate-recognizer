@@ -241,12 +241,11 @@ class RecognizerWindow(QtGui.QWidget):
 						pattern.write("1")
 					else:
 						pattern.write("0")
-			print pattern.getvalue()
+
 			res = self.neuralNet.recognize(pattern.getvalue())
 			pattern.close()
 
 			self.lblResult.setText(self.answers.get(res))
-			print res
 	
 	def updateLabelTrain(self):
 		if self.trained:
